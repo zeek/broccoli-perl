@@ -1,0 +1,9 @@
+BroConn	 *		T_PTROBJ
+BroEvent *		T_PTROBJ
+BroBuf *		T_PTROBJ
+BroRecord *		T_PTROBJ
+BroTable *		T_PTROBJ
+BroSet * 		T_PTROBJ
+BroEvMeta *		T_PTROBJ
+BroPacket *		T_PTROBJ
+const void *		T_PTR
