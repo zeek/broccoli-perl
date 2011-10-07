@@ -1,5 +1,6 @@
 package Broccoli::Connection::Type;
-#dummy package for blessing types
+
+#dummy packages for blessing types
 
 
 package Broccoli::Connection;
@@ -106,10 +107,10 @@ sub count {
 	my $arg = shift;
 	assert(defined($arg));
 
-	return {
+	return bless {
 		type => "BRO_TYPE_COUNT",
 		value => $arg
-	};
+	}, 'Broccoli::Connection::Type';
 }
 
 sub btime {
@@ -118,23 +119,20 @@ sub btime {
 	my $arg = shift;
 	assert(defined($arg));
 
-	return {
+	return bless {
 		type => "BRO_TYPE_TIME",
 		value => $arg
-	};
+	}, 'Broccoli::Connection::Type';
 }
 
-sub record {
-	shift if ( defined $_[0] && defined(blessed($_[0])) && blessed($_[0]) eq __PACKAGE__ );
-	
-	my $arg = shift;
-	
-	assert(defined($arg));
-
-	return { type => "RECORD",
-		value => $arg
-	};
-}
+#sub record {
+#	shift if ( defined $_[0] && defined(blessed($_[0])) && blessed($_[0]) eq __PACKAGE__ );
+#	
+#	my $arg = shift;
+#	assert(defined($arg));
+#
+#	return bless $arg, 'Broccoli::Connection::RECORD';
+#}
 
 sub current_time {
 	return bro_util_current_time();
@@ -145,12 +143,25 @@ sub parseArgument {
 	my $arg = shift;
 	my $type;
 	
-	if ( ref($arg) eq "HASH" ) {
+	assert (defined($arg));
+	
+	if ( defined(blessed($arg)) &&  blessed($arg) eq 'Broccoli::Connection::Type') {
 		assert(defined($$arg{"type"}));
 		assert(defined($$arg{"value"}));
 		$type = $$arg{"type"};
 		$arg = $$arg{"value"};		
 
+	} elsif (ref($arg) eq 'HASH') { 
+		my $record = bro_record_new();
+		
+		while (my ($key, $value) = each($arg) ) {
+			my ($type, $val) = parseArgument($value);
+			#say "adding type $type to record";
+			my $res = bro_record_add_val_short($record, $key, $type, $val);
+			assert($res != 0);
+		}
+		
+		return (18, $record);
 	} else {
 
 		given( $arg ) {
@@ -179,11 +190,13 @@ sub send {
 	my $self = shift;
 	my $name = shift;
 	
+	
 	my $ev = bro_event_new($name);
 	for my $arg (@_) {
 		my ($typenum, $value) = parseArgument($arg);
 		
 		bro_event_add_val_short($ev, $typenum, $value);
+
 	}
 
 	bro_event_send($self->broconn, $ev);
@@ -202,11 +215,19 @@ use Inline C => Config =>
 
 use Inline C => <<'END_OF_C_CODE';
 
+BroRecord* testingonly () {
+	//BroEvent* be = bro_event_new("test");
+	BroRecord* br = bro_record_new();
+	
+	//bro_event_add_val_short(be, 18, br);
+	return br;
+}
+
 SV* parseArg(BroEvArg arg) {
 	switch ( arg.arg_type ) {
 		case BRO_TYPE_BOOL:
 		case BRO_TYPE_INT: {
-			int64_t* val = (int64_t) arg.arg_data;
+			int64_t* val = (int64_t *) arg.arg_data;
 
 			int v = *val;
 
@@ -217,9 +238,8 @@ SV* parseArg(BroEvArg arg) {
 		case BRO_TYPE_COUNT:
 		case BRO_TYPE_COUNTER: {
 			uint64_t* val = (uint64_t *) arg.arg_data;
-			unsigned int v = *val;
 
-			return (newSVuv(v));
+			return (newSVuv(*val));
 			break;
 		}
 		
@@ -232,6 +252,31 @@ SV* parseArg(BroEvArg arg) {
 			return (newSVnv(v));
 			break;
 		} 
+		
+		case BRO_TYPE_RECORD: { // oh, yummie, a record
+			HV* h = newHV();
+			BroRecord *rec = arg.arg_data;
+			int i = 0;
+			int *type = (int*) malloc(sizeof(int));
+			const char *name;
+			while ( (name = bro_record_get_nth_name(rec, i) ) != NULL ) {
+				*type = BRO_TYPE_UNKNOWN;
+				void * value = bro_record_get_nth_val(rec, i, type);
+				//printf("Adding field: %s at position %d with type %d\n", name, i, *type);
+				if ( value == NULL ) {
+					croak("Internal error - undefined value. Record name %s", name);
+				}
+				
+				BroEvArg dummyev;
+				dummyev.arg_data = value;
+				dummyev.arg_type = *type;
+				
+				hv_store(h, name, strlen(name), parseArg(dummyev), 0); 
+				i++;
+			}
+			return newRV_noinc((SV*) h);
+			break;
+		}
 
 		default: {	
 			croak("unimplemented type %d", arg.arg_type);
@@ -252,7 +297,7 @@ void callbackfunction(BroConn *bc, void* user_data, BroEvMeta *meta) {
 	int numargs = meta->ev_numargs;
 	int i; 
 
-	printf("%d args", numargs);
+	//printf("%d args", numargs);
 	
 	BroEvArg* args = meta->ev_args;
 
@@ -350,7 +395,7 @@ void * objToVal(SV* obj, int type) {
 			return (void*) str;
 			break;
 		}
-
+		
 		default: {
 			croak("unimplemented type");
 			return NULL;
@@ -361,6 +406,11 @@ void * objToVal(SV* obj, int type) {
 int bro_event_add_val_short(BroEvent *be, int type, const void *val) {
 	return bro_event_add_val(be, type, NULL, val);
 }
+
+int bro_record_add_val_short(BroRecord *rec, const char *name, int type, const void *val) {
+	return bro_record_add_val(rec, name, type, NULL, val);
+}
+
 
 int            bro_init(const BroCtx *ctx);
 BroConn       *bro_conn_new_str(const char *hostname, int flags);
@@ -374,6 +424,7 @@ int            bro_event_add_val(BroEvent *be, int type, const char *type_name, 
 int            bro_event_send(BroConn *bc, BroEvent *be);
 void           bro_event_registry_add_compact(BroConn *bc, const char *event_name, BroCompactEventFunc func, void *user_data);
 double         bro_util_current_time();
+BroRecord     *bro_record_new();
 int            bro_conn_get_fd(BroConn *bc);
 void           bro_event_registry_request(BroConn *bc);
 

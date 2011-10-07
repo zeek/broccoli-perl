@@ -1,7 +1,7 @@
 BroConn	 *		T_PTROBJ
 BroEvent *		T_PTROBJ
 BroBuf *		T_PTROBJ
-BroRecord *		T_PTROBJ
+BroRecord *		T_PTR
 BroTable *		T_PTROBJ
 BroSet * 		T_PTROBJ
 BroEvMeta *		T_PTROBJ
