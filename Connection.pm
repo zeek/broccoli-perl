@@ -16,7 +16,7 @@ use Exporter;
 use Scalar::Util qw/blessed/;
 
 use base qw(Exporter Class::Accessor);
-our $VERSION = 0.1;
+our $VERSION = 0.01;
 
 
 our %EXPORT_TAGS = ('types' => [qw/count btime record current_time/] );
@@ -60,6 +60,64 @@ BRO_TYPE_SET =>             25, # /* ----------- (ditto) ---------- */
 BRO_TYPE_MAX =>             26,
 );
 
+=head1 NAME
+
+Broccoli::Connection - connect to broccoli
+
+=head1 SYNOPSIS
+
+	# import Broccoli and all types
+	use Broccoli::Connection qw/:types/;
+
+	# connect to bro
+	my $b = Broccoli::Connection->new(
+		{
+			destination => "localhost:47758"
+		});
+
+	# send events
+	$b->send("ping", seq++);
+
+	# define event handlers
+	$b->event("pong", sub {
+		my $seq = shift;
+		say "Received pong with number $seq";
+	});
+
+	# register event handlers with broccoli
+	$b->registerEvents() 
+
+=head1 FUNCTIONS
+
+=over 4
+
+=item B<new>
+
+	my $bro = Broccoli::Connection->new(\%Parameters);
+
+Create a new bro connection. Currently there is only one parameter named
+destination that has to be set.
+
+=cut
+
+sub new {
+	my $self = Class::Accessor::new(@_);
+	
+	assert(defined($self->destination));
+
+	$self->broconn(setup($self->destination));
+	
+	return $self;
+}
+
+=item B<event>
+
+	event(NAME, FUNCTIONREFERENCE);
+
+Register the event NAME and call the given function reverence when
+the event is sent by bro.
+
+=cut
 
 sub event {
 	my $self = shift;
@@ -79,6 +137,7 @@ sub event {
 	addCallback($self->broconn, $name, \%call);
 }
 
+
 sub dispatchCallback {
 	my $param = shift;
 	assert(defined($param));
@@ -86,20 +145,32 @@ sub dispatchCallback {
 	&{$$param{"callback"}}(@_);
 }
 
-sub new {
-	my $self = Class::Accessor::new(@_);
-	
-	assert(defined($self->destination));
+=item B<registerEvents()>
 
-	$self->broconn(setup($self->destination));
-	
-	return $self;
-}
+	$bro->registerEvents();
+
+Register the event handlers with bro. Has to be called once to receive evevents.
+
+=cut
 
 sub registerEvents() {
 	my $self = shift;
 	bro_event_registry_request($self->broconn);
 }
+
+=item B<count>
+
+	$bro->send("ping", count(12));
+
+or
+	
+	$bro->send("ping", $bro->count(12));
+
+if the types have not been imported into the namespace.
+
+Set the type of the value to count
+
+=cut
 
 sub count {
 	shift if ( defined $_[0] && defined(blessed($_[0])) && blessed($_[0]) eq __PACKAGE__ );
@@ -112,6 +183,12 @@ sub count {
 		value => $arg
 	}, 'Broccoli::Connection::Type';
 }
+
+=item B<btime>
+
+Set the type of the value to time
+
+=cut
 
 sub btime {
 	shift if ( defined $_[0] && defined(blessed($_[0])) && blessed($_[0]) eq __PACKAGE__ );
@@ -133,6 +210,14 @@ sub btime {
 #
 #	return bless $arg, 'Broccoli::Connection::RECORD';
 #}
+
+=item B<current_time>
+
+	my $currtime = current_time();
+
+Return the current timestamp according to bro.
+
+=cut
 
 sub current_time {
 	return bro_util_current_time();
@@ -186,6 +271,24 @@ sub parseArgument {
 	return ($typenum, objToVal($arg, $typenum));
 }
 
+=item B<send>
+
+	$bro->send(EVENT, PARAM1, PARAM2, ...)
+
+Send the event EVENT with parameters PARAM1, ...
+The type of the parameters is either given via the appropriate functions like count or determined automatically by inspecting the variable contents.
+
+Records can be sent by defining a hashref, e.g.:
+
+	$bro->send("test", { 
+		a => 1,
+		b => count(2).
+	});
+
+=back
+
+=cut
+
 sub send {
 	my $self = shift;
 	my $name = shift;
@@ -205,15 +308,19 @@ sub send {
 }
 
 use Inline C => Config =>
-#        VERSION => '0.01',
+        VERSION => '0.01',
         NAME => 'Broccoli::Connection',
-        MYEXTLIB => '/n/shokuji/db/bernhard/broinstall/lib/libbroccoli.so',
-	CCFLAGS => "-I/n/shokuji/db/bernhard/broinstall/include",
-	TYPEMAPS => "/n/shokuji/db/bernhard/Broccoli-Connection/lib/Broccoli/btypemap",
+	LIBS => $ENV{LDDFLAGS}.' -lbroccoli',
+#	MYEXTLIB => '-lbroccoli',
+	CCFLAGS => $ENV{CCFLAGS},
+#       MYEXTLIB => '/n/shokuji/db/bernhard/broinstall/lib/libbroccoli.so',
+#	CCFLAGS => "-I/n/shokuji/db/bernhard/broinstall/include",
+#	TYPEMAPS => "/n/shokuji/db/bernhard/Broccoli-Connection/lib/Broccoli/btypemap",
 	AUTO_INCLUDE => '#include "broccoli.h"',
 	ENABLE => "AUTOWRAP";
 
 use Inline C => <<'END_OF_C_CODE';
+#include <dlfcn.h>
 
 BroRecord* testingonly () {
 	//BroEvent* be = bro_event_new("test");
@@ -338,6 +445,7 @@ void * stringToPtr(const char *string) {
 }
 
 BroConn *setup(char * destination) {
+	dlopen("libbroccoli.so", RTLD_NOW);
 	bro_init(NULL);
 	BroConn *bc = bro_conn_new_str(destination, BRO_CFLAG_NONE);
 	
