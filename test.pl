@@ -10,6 +10,8 @@ $b->event("pong", sub {
 	say "pong - seq=$seq, time=". ($dst_time-$src_time)."/".($b->current_time()-$src_time);
 });
 
+$b->registerEvents();
+
 my $seq = 0;
 for (;;) {
 	$b->send("ping", $b->time($b->current_time()), $b->count($seq++));

@@ -4,16 +4,20 @@ use 5.12.0;
 use strict;
 use warnings;
 
-use Moose;
+use Class::Accessor;
 use Carp::Assert;
 use Data::Dumper;
+use Scalar::Util qw/blessed/;
 
+use base qw(Class::Accessor);
 our $VERSION = 0.1;
 
-has 'destination' => (is => 'rw', isa => 'Str', required => 1);
-has 'broclass' => (is => 'rw', isa => 'Str', required => 0, default => "");
+#has 'destination' => (is => 'rw', isa => 'Str', required => 1);
+#has 'broclass' => (is => 'rw', isa => 'Str', required => 0, default => "");
 
-has 'broconn' => (is => 'rw');
+#has 'broconn' => (is => 'rw');
+
+__PACKAGE__->mk_accessors(qw/destination broconn/);
 
 my %BROTYPES = ( 
 BRO_TYPE_UNKNOWN =>          0,
@@ -77,11 +81,14 @@ sub dispatchCallback {
 	&{$$param{"callback"}}(@_);
 }
 
-
-sub BUILD {
-	my $self = shift;	
+sub new {
+	my $self = Class::Accessor::new(@_);
+	
+	assert(defined($self->destination));
 
 	$self->broconn(setup($self->destination));
+	
+	return $self;
 
 	# ok, let's register our predeclared events...
 	#while ( my ($event, $coderef) = each %eventregister) {
@@ -90,9 +97,14 @@ sub BUILD {
 	#}
 }
 
+sub registerEvents() {
+	my $self = shift;
+	bro_event_registry_request($self->broconn);
+}
 
 sub count {
-	my $self = shift;
+	shift if ( defined $_[0] && defined(blessed($_[0])) && blessed($_[0]) eq __PACKAGE__ );
+
 	my $arg = shift;
 	assert(defined($arg));
 
@@ -103,7 +115,8 @@ sub count {
 }
 
 sub time {
-	my $self = shift;
+	shift if ( defined $_[0] && defined(blessed($_[0])) && blessed($_[0]) eq __PACKAGE__ );
+
 	my $arg = shift;
 	assert(defined($arg));
 
@@ -114,7 +127,8 @@ sub time {
 }
 
 sub record {
-	my $self = shift;
+	shift if ( defined $_[0] && defined(blessed($_[0])) && blessed($_[0]) eq __PACKAGE__ );
+	
 	my $arg = shift;
 	
 	assert(defined($arg));
@@ -144,19 +158,19 @@ sub send {
 
 		} else {
 
-		given( $arg ) {
-			when( /^\d+\z/ )
-				{ continue }
-			when( /^-?\d+\z/ )
-				{ continue }
-			when( /^[+-]?\d+\z/ )
-				{ $type = "BRO_TYPE_INT" }
-			when( /^-?(?:\d+\.?|\.\d)\d*\z/ )
-				{ continue }
-			when( /^[+-]?(?=\.?\d)\d*\.?\d*(?:e[+-]?\d+)?\z/i)
-				{ $type = "BRO_TYPE_FLOAT" }
-			default { $type = "BRO_TYPE_STRING" }
-		}	
+			given( $arg ) {
+				when( /^\d+\z/ )
+					{ continue }
+				when( /^-?\d+\z/ )
+					{ continue }
+				when( /^[+-]?\d+\z/ )
+					{ $type = "BRO_TYPE_INT" }
+				when( /^-?(?:\d+\.?|\.\d)\d*\z/ )
+					{ continue }
+				when( /^[+-]?(?=\.?\d)\d*\.?\d*(?:e[+-]?\d+)?\z/i)
+					{ $type = "BRO_TYPE_FLOAT" }
+				default { $type = "BRO_TYPE_STRING" }
+			}	
 		}		
 
 		die if ( !defined($type) || !defined($BROTYPES{$type}) );
@@ -265,7 +279,6 @@ void addCallback(BroConn *bc, const char* event_name, SV *user_data) {
 	SV* e = SvREFCNT_inc(user_data);
 
 	bro_event_registry_add_compact(bc, event_name, callbackfunction, (void*) e);
-	bro_event_registry_request(bc);
 }
 
 void * stringToPtr(const char *string) {
@@ -363,6 +376,7 @@ int            bro_event_send(BroConn *bc, BroEvent *be);
 void           bro_event_registry_add_compact(BroConn *bc, const char *event_name, BroCompactEventFunc func, void *user_data);
 double         bro_util_current_time();
 int            bro_conn_get_fd(BroConn *bc);
+void           bro_event_registry_request(BroConn *bc);
 
 
 END_OF_C_CODE
