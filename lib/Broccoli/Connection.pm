@@ -7,10 +7,16 @@ use warnings;
 use Class::Accessor;
 use Carp::Assert;
 use Data::Dumper;
+use Exporter;
 use Scalar::Util qw/blessed/;
 
-use base qw(Class::Accessor);
+use base qw(Exporter Class::Accessor);
 our $VERSION = 0.1;
+
+
+our %EXPORT_TAGS = ('types' => [qw/count btime record current_time/] );
+
+Exporter::export_ok_tags('types');
 
 #has 'destination' => (is => 'rw', isa => 'Str', required => 1);
 #has 'broclass' => (is => 'rw', isa => 'Str', required => 0, default => "");
@@ -114,7 +120,7 @@ sub count {
 	};
 }
 
-sub time {
+sub btime {
 	shift if ( defined $_[0] && defined(blessed($_[0])) && blessed($_[0]) eq __PACKAGE__ );
 
 	my $arg = shift;

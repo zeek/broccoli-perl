@@ -1,6 +1,6 @@
 use 5.12.0;
 
-use Broccoli::Connection;
+use Broccoli::Connection qw/:types/;
 
 my $b = Broccoli::Connection->new({destination => "localhost:47757"});
 
@@ -14,6 +14,6 @@ $b->registerEvents();
 
 my $seq = 0;
 for (;;) {
-	$b->send("ping", $b->time($b->current_time()), $b->count($seq++));
+	$b->send("ping", btime(current_time()), count($seq++));
 	sleep(1);
 }
