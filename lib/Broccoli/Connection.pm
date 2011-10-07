@@ -1,3 +1,7 @@
+package Broccoli::Connection::Type;
+#dummy package for blessing types
+
+
 package Broccoli::Connection;
 
 use 5.12.0;
@@ -63,8 +67,6 @@ sub event {
 	assert(defined($name));
 	my $coderef = shift;
 	assert(defined($coderef));
-
-	#$eventregister{$name} = $coderef;
 	
 	my %call = (
 		event => $name,
@@ -79,11 +81,7 @@ sub event {
 sub dispatchCallback {
 	my $param = shift;
 	assert(defined($param));
-	
-	#say Dumper($param);
-
-	#say "Dispatching event ".$$param{"event"};
-	
+		
 	&{$$param{"callback"}}(@_);
 }
 
@@ -95,12 +93,6 @@ sub new {
 	$self->broconn(setup($self->destination));
 	
 	return $self;
-
-	# ok, let's register our predeclared events...
-	#while ( my ($event, $coderef) = each %eventregister) {
-	#	say "registering $event";
-	#	addCallback($self->broconn, $event);
-	#}
 }
 
 sub registerEvents() {
@@ -148,44 +140,50 @@ sub current_time {
 	return bro_util_current_time();
 }
 
+
+sub parseArgument {
+	my $arg = shift;
+	my $type;
+	
+	if ( ref($arg) eq "HASH" ) {
+		assert(defined($$arg{"type"}));
+		assert(defined($$arg{"value"}));
+		$type = $$arg{"type"};
+		$arg = $$arg{"value"};		
+
+	} else {
+
+		given( $arg ) {
+			when( /^\d+\z/ )
+				{ continue }
+			when( /^-?\d+\z/ )
+				{ continue }
+			when( /^[+-]?\d+\z/ )
+				{ $type = "BRO_TYPE_INT" }
+			when( /^-?(?:\d+\.?|\.\d)\d*\z/ )
+				{ continue }
+			when( /^[+-]?(?=\.?\d)\d*\.?\d*(?:e[+-]?\d+)?\z/i)
+				{ $type = "BRO_TYPE_FLOAT" }
+			default { $type = "BRO_TYPE_STRING" }
+		}	
+	}		
+
+	die if ( !defined($type) || !defined($BROTYPES{$type}) );
+	
+	my $typenum = $BROTYPES{$type};
+	
+	return ($typenum, objToVal($arg, $typenum));
+}
+
 sub send {
 	my $self = shift;
 	my $name = shift;
 	
 	my $ev = bro_event_new($name);
 	for my $arg (@_) {
-		my $type;
-
-		if ( ref($arg) eq "HASH" ) {
-			assert(defined($$arg{"type"}));
-			assert(defined($$arg{"value"}));
-			$type = $$arg{"type"};
-			$arg = $$arg{"value"};		
-
-		} else {
-
-			given( $arg ) {
-				when( /^\d+\z/ )
-					{ continue }
-				when( /^-?\d+\z/ )
-					{ continue }
-				when( /^[+-]?\d+\z/ )
-					{ $type = "BRO_TYPE_INT" }
-				when( /^-?(?:\d+\.?|\.\d)\d*\z/ )
-					{ continue }
-				when( /^[+-]?(?=\.?\d)\d*\.?\d*(?:e[+-]?\d+)?\z/i)
-					{ $type = "BRO_TYPE_FLOAT" }
-				default { $type = "BRO_TYPE_STRING" }
-			}	
-		}		
-
-		die if ( !defined($type) || !defined($BROTYPES{$type}) );
-
-		my $typenum = $BROTYPES{$type};
-
-		#say "adding $type, num: $typenum";
-
-		bro_event_add_val_short($ev, $typenum, objToVal($arg, $typenum));
+		my ($typenum, $value) = parseArgument($arg);
+		
+		bro_event_add_val_short($ev, $typenum, $value);
 	}
 
 	bro_event_send($self->broconn, $ev);
@@ -344,11 +342,6 @@ void * objToVal(SV* obj, int type) {
 			STRLEN len;
 			char* tmp;
 			tmp = SvPV(obj, len);
-			//printf("Len is %d\n", len);
-
-			/* char* outstr = malloc(len+1);
-			memcpy(outstr,tmp, len);
-			outstr[len+1] = 0; */
 			
 			if ( !bro_string_set_data(str, tmp, len)) {
 				carp("Problem");
