@@ -14,12 +14,13 @@ use Carp::Assert;
 use Data::Dumper;
 use Exporter;
 use Scalar::Util qw/blessed/;
+use Socket;
 
 use base qw(Exporter Class::Accessor);
 our $VERSION = 0.01;
 
 
-our %EXPORT_TAGS = ('types' => [qw/count btime record current_time/] );
+our %EXPORT_TAGS = ('types' => [qw/count btime record current_time port interval double addr subnet bool/] );
 
 Exporter::export_ok_tags('types');
 
@@ -60,6 +61,30 @@ BRO_TYPE_SET =>             25, # /* ----------- (ditto) ---------- */
 BRO_TYPE_MAX =>             26,
 );
 
+my %protocols = (
+icmp => 1,
+igmp => 2,
+ipip => 4,
+tcp => 6,
+udp => 17,
+ipv6 => 41,
+routing => 43,
+fragment => 44,
+rsvp => 46,
+gre => 47,
+esp => 50,
+ag => 51,
+icmpv6 => 58,
+none => 59,
+dstopts => 60,
+mtp => 92,
+encap => 98,
+pim => 103,
+comp => 108,
+sctp => 132,
+raw => 255,
+);
+
 =head1 NAME
 
 Broccoli::Connection - connect to broccoli
@@ -77,6 +102,12 @@ Broccoli::Connection - connect to broccoli
 
 	# send events
 	$b->send("ping", seq++);
+
+	# send records
+	$b->send("recordtest", {
+		intvalue => 1,
+		stringvalue => "hi",
+	});
 
 	# define event handlers
 	$b->event("pong", sub {
@@ -184,6 +215,26 @@ sub count {
 	}, 'Broccoli::Connection::Type';
 }
 
+=item B<count>
+
+Set the type of the value to bool
+
+=cut
+
+sub bool {
+	shift if ( defined $_[0] && defined(blessed($_[0])) && blessed($_[0]) eq __PACKAGE__ );
+
+	my $arg = shift;
+	assert(defined($arg));
+
+	return bless {
+		type => "BRO_TYPE_BOOL",
+		value => $arg
+	}, 'Broccoli::Connection::Type';
+}
+
+
+
 =item B<btime>
 
 Set the type of the value to time
@@ -201,6 +252,126 @@ sub btime {
 		value => $arg
 	}, 'Broccoli::Connection::Type';
 }
+
+=item B<port>
+
+	port("125/tcp");
+
+Set the type of the value to port.
+
+=cut
+
+sub port {
+	shift if ( defined $_[0] && defined(blessed($_[0])) && blessed($_[0]) eq __PACKAGE__ );
+
+	my $arg = shift;
+	assert(defined($arg));
+
+	die unless($arg =~ m#(\d+)\/(\w+)#);
+	
+	my $port = $1;
+	my $proto = $2;
+
+	assert (defined($protocols{lc($proto)}));
+
+	return bless {
+		type => "BRO_TYPE_PORT",
+		value => [$port, $protocols{$proto}]
+	}, 'Broccoli::Connection::Type';
+}
+
+=item B<interval>
+
+Set the type of the value to interval
+
+=cut
+
+sub interval {
+	shift if ( defined $_[0] && defined(blessed($_[0])) && blessed($_[0]) eq __PACKAGE__ );
+
+	my $arg = shift;
+	assert(defined($arg));
+
+	return bless {
+		type => "BRO_TYPE_INTERVAL",
+		value => $arg
+	}, 'Broccoli::Connection::Type';
+
+}
+
+=item B<double>
+
+Set the type of the value to interval
+
+=cut
+
+sub double {
+	shift if ( defined $_[0] && defined(blessed($_[0])) && blessed($_[0]) eq __PACKAGE__ );
+
+	my $arg = shift;
+	assert(defined($arg));
+
+	return bless {
+		type => "BRO_TYPE_DOUBLE",
+		value => $arg
+	}, 'Broccoli::Connection::Type';
+
+}
+
+=item B<addr>
+
+Set the type of the value to addr
+
+=cut
+
+sub ip2long{
+    return sprintf "%u", unpack("l*", pack("l*", unpack("N*", inet_aton(shift))));
+}
+
+sub long2ip {
+    return inet_ntoa(pack("N*", shift));
+}
+
+sub addr {
+	shift if ( defined $_[0] && defined(blessed($_[0])) && blessed($_[0]) eq __PACKAGE__ );
+
+	my $arg = shift;
+	assert(defined($arg));
+	
+	#die("invalid addr format: $arg") unless($arg =~ m#(\d+)\/(\w+)#);
+	
+	return bless {
+		type => "BRO_TYPE_IPADDR",
+		value => ip2long($arg)
+	}, 'Broccoli::Connection::Type';
+
+}
+
+=item B<subnet>
+
+Set the type of the value to subnet
+
+=cut
+
+sub subnet {
+	shift if ( defined $_[0] && defined(blessed($_[0])) && blessed($_[0]) eq __PACKAGE__ );
+
+	my $arg = shift;
+	assert(defined($arg));
+
+	die("invalid addr format: $arg") unless($arg =~ m#(\d+)\/(\w+)#);
+	
+	my $addr = $1;
+	my $mask = $2;
+
+	return bless {
+		type => "BRO_TYPE_SUBNET",
+		value => [ ip2long($addr), $mask]
+	}, 'Broccoli::Connection::Type';
+
+}
+
+
 
 #sub record {
 #	shift if ( defined $_[0] && defined(blessed($_[0])) && blessed($_[0]) eq __PACKAGE__ );
@@ -299,6 +470,7 @@ sub send {
 		my ($typenum, $value) = parseArgument($arg);
 		
 		bro_event_add_val_short($ev, $typenum, $value);
+		#say "Adding $typenum";
 
 	}
 
@@ -320,15 +492,10 @@ use Inline C => Config =>
 	ENABLE => "AUTOWRAP";
 
 use Inline C => <<'END_OF_C_CODE';
-#include <dlfcn.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
 
-BroRecord* testingonly () {
-	//BroEvent* be = bro_event_new("test");
-	BroRecord* br = bro_record_new();
-	
-	//bro_event_add_val_short(be, 18, br);
-	return br;
-}
 
 SV* parseArg(BroEvArg arg) {
 	switch ( arg.arg_type ) {
@@ -360,6 +527,43 @@ SV* parseArg(BroEvArg arg) {
 			break;
 		} 
 		
+		case BRO_TYPE_STRING: {
+			BroString *str = (BroString*) arg.arg_data;
+			
+			SV* val = newSVpvn(str->str_val, str->str_len);
+			return val;
+			break;
+		}
+		
+		case BRO_TYPE_PORT: {
+			BroPort *port = (BroPort*) arg.arg_data;
+			
+			SV* out = newSVpvf("%u/%d", port->port_num, port->port_proto);
+			return out;
+			break;
+		}
+		
+		case BRO_TYPE_SUBNET: {
+			BroSubnet *net = (BroSubnet*) arg.arg_data;
+			
+			SV* out = newSVpvf("%u/%d", net->sn_net, net->sn_width);
+			return out;
+			break;
+		}
+
+		
+		case BRO_TYPE_IPADDR: {
+			double* val = (double *) arg.arg_data;
+			
+			struct in_addr address;
+			address.s_addr = val;
+			
+			char* str = inet_ntoa(address);
+			SV* out = newSVpv(str, 0);
+			return out;
+			break;
+		}
+		
 		case BRO_TYPE_RECORD: { // oh, yummie, a record
 			HV* h = newHV();
 			BroRecord *rec = arg.arg_data;
@@ -386,7 +590,7 @@ SV* parseArg(BroEvArg arg) {
 		}
 
 		default: {	
-			croak("unimplemented type %d", arg.arg_type);
+			croak("unimplemented type %d in parsearg", arg.arg_type);
 		}
 	}
 }
@@ -440,12 +644,11 @@ void addCallback(BroConn *bc, const char* event_name, SV *user_data) {
 void * stringToPtr(const char *string) {
 	char * out = malloc(strlen(string)+1);
 	memcpy(out, string, strlen(string)+1);
-	return (void*)&out; 
+	return (void*)out; 
 	//return (void*) &string;
 }
 
 BroConn *setup(char * destination) {
-	dlopen("libbroccoli.so", RTLD_NOW);
 	bro_init(NULL);
 	BroConn *bc = bro_conn_new_str(destination, BRO_CFLAG_NONE);
 	
@@ -472,6 +675,59 @@ void * objToVal(SV* obj, int type) {
 			break;
 		}
 
+		case BRO_TYPE_PORT: {
+			// obj is arrayref.
+			if ( !SvRV(obj) ) {
+				croak("Expected reference");
+			}
+			if ( !( SvTYPE(SvRV(obj)) == SVt_PVAV ) ) {
+				croak("Expected array reference");
+			}
+			
+			AV* array = (AV*) SvRV(obj);
+			
+			if ( av_len(array) != 1 ) { // index of last element
+				croak("Expected pair, len is: %d", av_len(array));
+			}
+			
+			SV* theport = av_shift(array);
+			SV* theprotocol = av_shift(array);
+			
+			BroPort* port = (BroPort *)malloc(sizeof(BroPort));
+			port->port_num = SvUV(theport);
+			port->port_proto = SvIV(theprotocol);
+			return (void*) port;
+			break;
+			
+		}
+		
+		case BRO_TYPE_SUBNET: {
+			// obj is arrayref.
+			if ( !SvRV(obj) ) {
+				croak("Expected reference");
+			}
+			if ( !( SvTYPE(SvRV(obj)) == SVt_PVAV ) ) {
+				croak("Expected array reference");
+			}
+			
+			AV* array = (AV*) SvRV(obj);
+			
+			if ( av_len(array) != 1 ) { // index of last element
+				croak("Expected pair, len is: %d", av_len(array));
+			}
+			
+			SV* thenet = av_shift(array);
+			SV* thewidth = av_shift(array);
+			
+			BroSubnet* net = (BroSubnet *)malloc(sizeof(BroSubnet));
+			net->sn_net = SvUV(thenet);
+			net->sn_width = SvUV(thewidth);
+			return (void*) net;
+			break;
+			
+		}
+
+
 		case BRO_TYPE_COUNT:
 		case BRO_TYPE_COUNTER: {
 			uint64_t* tmp = (uint64_t *)malloc(sizeof(uint64_t));
@@ -485,6 +741,13 @@ void * objToVal(SV* obj, int type) {
 		case BRO_TYPE_INTERVAL: {
 			double* tmp = (double *)malloc(sizeof(double));
 			*tmp = SvNV(obj);
+			return (void*) tmp;
+			break;
+		}
+				
+		case BRO_TYPE_IPADDR: {
+			int * tmp = (int*)malloc(sizeof(int));
+			*tmp = SvIV(obj);
 			return (void*) tmp;
 			break;
 		}
@@ -505,7 +768,7 @@ void * objToVal(SV* obj, int type) {
 		}
 		
 		default: {
-			croak("unimplemented type");
+			croak("unimplemented type %d in objtoval", type);
 			return NULL;
 		}
 	}
