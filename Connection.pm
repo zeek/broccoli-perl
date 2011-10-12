@@ -394,7 +394,6 @@ sub current_time {
 	return bro_util_current_time();
 }
 
-
 sub parseArgument {
 	my $arg = shift;
 	my $type;
@@ -478,6 +477,19 @@ sub send {
 	bro_event_free($ev);
 	bro_conn_process_input($self->broconn);
 }
+
+=item B<process>
+
+Process pending input events
+
+=cut
+
+sub process {
+	my $self = shift;
+	bro_conn_process_input($self->broconn);
+}
+
+
 
 use Inline C => Config =>
         VERSION => '0.01',
