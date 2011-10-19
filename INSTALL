@@ -1,0 +1,18 @@
+Requirements:
+
+Inline with C bindings
+Class::Accessor
+Carp::Assert
+
+To install do something like:
+
+export CCFLAGS="-I/Users/bernhard/sw/include"
+export LDDFLAGS="-L/Users/bernhard/sw/lib"
+
+perl Makefile.PL
+
+make 
+make install
+
+If broccoli.h is not found (many unknown defitnition), check CCFLAGS. If scripts complain about dynamic linking errors on start, check LDDFLAGS.
+

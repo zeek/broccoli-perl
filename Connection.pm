@@ -14,22 +14,16 @@ use Carp::Assert;
 use Data::Dumper;
 use Exporter;
 use Scalar::Util qw/blessed/;
-use Socket;
 
 use base qw(Exporter Class::Accessor);
 our $VERSION = 0.01;
 
 
-our %EXPORT_TAGS = ('types' => [qw/count btime record current_time port interval double addr subnet bool/] );
+our %EXPORT_TAGS = ('types' => [qw/count btime current_time port interval double addr subnet bool/] );
 
 Exporter::export_ok_tags('types');
 
-#has 'destination' => (is => 'rw', isa => 'Str', required => 1);
-#has 'broclass' => (is => 'rw', isa => 'Str', required => 0, default => "");
-
-#has 'broconn' => (is => 'rw');
-
-__PACKAGE__->mk_accessors(qw/destination broconn/);
+__PACKAGE__->mk_accessors(qw/destination broconn guess_types/);
 
 my %BROTYPES = ( 
 BRO_TYPE_UNKNOWN =>          0,
@@ -108,6 +102,9 @@ Broccoli::Connection - connect to broccoli
 		intvalue => 1,
 		stringvalue => "hi",
 	});
+	
+	# send records of records
+	$b->send("RecordOfRecordTest, { first => { intvalue => 1 }, second => { stringvalue => "hiho" }};
 
 	# define event handlers
 	$b->event("pong", sub {
@@ -137,6 +134,9 @@ sub new {
 	assert(defined($self->destination));
 
 	$self->broconn(setup($self->destination));
+	if ( !defined($self->guess_types) ) {
+		$self->guess_types(0);
+	}
 	
 	return $self;
 }
@@ -324,14 +324,6 @@ Set the type of the value to addr
 
 =cut
 
-sub ip2long{
-    return sprintf "%u", unpack("l*", pack("l*", unpack("N*", inet_aton(shift))));
-}
-
-sub long2ip {
-    return inet_ntoa(pack("N*", shift));
-}
-
 sub addr {
 	shift if ( defined $_[0] && defined(blessed($_[0])) && blessed($_[0]) eq __PACKAGE__ );
 
@@ -342,7 +334,7 @@ sub addr {
 	
 	return bless {
 		type => "BRO_TYPE_IPADDR",
-		value => ip2long($arg)
+		value => $arg
 	}, 'Broccoli::Connection::Type';
 
 }
@@ -359,28 +351,18 @@ sub subnet {
 	my $arg = shift;
 	assert(defined($arg));
 
-	die("invalid addr format: $arg") unless($arg =~ m#(\d+)\/(\w+)#);
+	die("invalid addr format: $arg") unless($arg =~ m#(^[\d\.]+)\/(\w+)$#);
 	
 	my $addr = $1;
 	my $mask = $2;
-
+	
 	return bless {
 		type => "BRO_TYPE_SUBNET",
-		value => [ ip2long($addr), $mask]
+		value => [ $addr, $mask]
 	}, 'Broccoli::Connection::Type';
 
 }
 
-
-
-#sub record {
-#	shift if ( defined $_[0] && defined(blessed($_[0])) && blessed($_[0]) eq __PACKAGE__ );
-#	
-#	my $arg = shift;
-#	assert(defined($arg));
-#
-#	return bless $arg, 'Broccoli::Connection::RECORD';
-#}
 
 =item B<current_time>
 
@@ -398,47 +380,53 @@ sub parseArgument {
 	my $arg = shift;
 	my $type;
 	
-	assert (defined($arg));
-	
-	if ( defined(blessed($arg)) &&  blessed($arg) eq 'Broccoli::Connection::Type') {
-		assert(defined($$arg{"type"}));
-		assert(defined($$arg{"value"}));
-		$type = $$arg{"type"};
-		$arg = $$arg{"value"};		
-
-	} elsif (ref($arg) eq 'HASH') { 
-		my $record = bro_record_new();
+	if ( !defined($arg) ) {
+		# well, this is perfectly ok. 
+		$type = "BRO_TYPE_UNKNOWN";
+	} else { 
 		
-		while (my ($key, $value) = each($arg) ) {
-			my ($type, $val) = parseArgument($value);
-			#say "adding type $type to record";
-			my $res = bro_record_add_val_short($record, $key, $type, $val);
-			assert($res != 0);
+		if ( defined(blessed($arg)) &&  blessed($arg) eq 'Broccoli::Connection::Type') {
+			assert(defined($$arg{"type"}));
+			assert(defined($$arg{"value"}));
+			$type = $$arg{"type"};
+			$arg = $$arg{"value"};		
+
+		} elsif (ref($arg) eq 'HASH') { 
+			my $record = bro_record_new();
+			#say "creating record";
+		
+			while (my ($key, $value) = each($arg) ) {
+				my ($type, $val) = parseArgument($value);
+				#say "adding type $type to record";
+				my $res = bro_record_add_val_short($record, $key, $type, $val) if ($type != 0);  # Ignore BRO_TYPE_UNKNOWN
+				assert($res != 0) if ( $type != 0 ) ;
+			}
+		
+			return (18, $record);
+		} else {
+
+			given( $arg ) {
+				when( /^\d+\z/ )
+					{ continue }
+				when( /^-?\d+\z/ )
+					{ continue }
+				when( /^[+-]?\d+\z/ )
+					{ $type = "BRO_TYPE_INT" }
+				when( /^-?(?:\d+\.?|\.\d)\d*\z/ )
+					{ continue }
+				when( /^[+-]?(?=\.?\d)\d*\.?\d*(?:e[+-]?\d+)?\z/i)
+					{ $type = "BRO_TYPE_FLOAT" }
+				default { $type = "BRO_TYPE_STRING" }
+			}	
 		}
-		
-		return (18, $record);
-	} else {
-
-		given( $arg ) {
-			when( /^\d+\z/ )
-				{ continue }
-			when( /^-?\d+\z/ )
-				{ continue }
-			when( /^[+-]?\d+\z/ )
-				{ $type = "BRO_TYPE_INT" }
-			when( /^-?(?:\d+\.?|\.\d)\d*\z/ )
-				{ continue }
-			when( /^[+-]?(?=\.?\d)\d*\.?\d*(?:e[+-]?\d+)?\z/i)
-				{ $type = "BRO_TYPE_FLOAT" }
-			default { $type = "BRO_TYPE_STRING" }
-		}	
-	}		
+	}
 
 	die if ( !defined($type) || !defined($BROTYPES{$type}) );
 	
 	my $typenum = $BROTYPES{$type};
 	
-	return ($typenum, objToVal($arg, $typenum));
+	return ($typenum, 
+	objToVal($arg, $typenum));
 }
 
 =item B<send>
@@ -558,7 +546,11 @@ SV* parseArg(BroEvArg arg) {
 		case BRO_TYPE_SUBNET: {
 			BroSubnet *net = (BroSubnet*) arg.arg_data;
 			
-			SV* out = newSVpvf("%u/%d", net->sn_net, net->sn_width);
+			struct in_addr address;
+			address.s_addr = net->sn_net;
+			char* str = inet_ntoa(address);
+
+			SV* out = newSVpvf("%s/%d", str, net->sn_width);
 			return out;
 			break;
 		}
@@ -730,9 +722,18 @@ void * objToVal(SV* obj, int type) {
 			
 			SV* thenet = av_shift(array);
 			SV* thewidth = av_shift(array);
+			const char* netchar = SvPV_nolen(thenet);
+			
+			struct in_addr addr;
+			int res = inet_aton(netchar, &addr);
+			if ( res == 0 ) {
+				croak("not an address");
+			}
+
 			
 			BroSubnet* net = (BroSubnet *)malloc(sizeof(BroSubnet));
-			net->sn_net = SvUV(thenet);
+			//printf("the net is %u\n", SvUV(thenet));
+			net->sn_net = addr.s_addr;
 			net->sn_width = SvUV(thewidth);
 			return (void*) net;
 			break;
@@ -758,9 +759,20 @@ void * objToVal(SV* obj, int type) {
 		}
 				
 		case BRO_TYPE_IPADDR: {
-			int * tmp = (int*)malloc(sizeof(int));
-			*tmp = SvIV(obj);
-			return (void*) tmp;
+			const char* tmp;
+			tmp = SvPV_nolen(obj);
+			//printf("address: %s\n", tmp);
+
+			struct in_addr addr;
+			int res = inet_aton(tmp, &addr);
+			if ( res == 0 ) {
+				croak("not an address");
+			}
+			
+			uint32_t* out = (uint32_t*)malloc(sizeof(uint32_t));
+			*out = addr.s_addr;
+			
+			return (void*) out;
 			break;
 		}
 
@@ -777,6 +789,15 @@ void * objToVal(SV* obj, int type) {
 
 			return (void*) str;
 			break;
+		}
+		
+		case BRO_TYPE_UNKNOWN: {
+			// test if car is undef.
+			if ( SvOK(obj) ) {
+				carp("Undefined object is defined?");
+			}
+			
+			return NULL;
 		}
 		
 		default: {

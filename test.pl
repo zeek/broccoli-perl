@@ -59,3 +59,12 @@ for(;;) {
 	sleep(1);
 }
 
+$b->send("test5", { one => undef, a => 13, b => undef, c => "helloworld", d => "undef" } );
+
+say "sending test6";
+#$b->send("test6", { a => 42, b => addr("6.6.7.7") } );
+
+
+$b->send("test6", { first => { a => 42, b => addr("6.6.7.7") }, second => { c => "hi" } } );
+
+sleep(1);
