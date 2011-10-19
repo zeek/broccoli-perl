@@ -104,7 +104,7 @@ Broccoli::Connection - connect to broccoli
 	});
 	
 	# send records of records
-	$b->send("RecordOfRecordTest, { first => { intvalue => 1 }, second => { stringvalue => "hiho" }};
+	$b->send("RecordOfRecordTest, { first => { intvalue => 1 }, second => { addr => addr("192.168.17.1") }};
 
 	# define event handlers
 	$b->event("pong", sub {
@@ -123,8 +123,19 @@ Broccoli::Connection - connect to broccoli
 
 	my $bro = Broccoli::Connection->new(\%Parameters);
 
-Create a new bro connection. Currently there is only one parameter named
-destination that has to be set.
+Create a new bro connection. 
+
+Possible parameters: destination and guess_types.
+
+Destination is the bro connection information. If guess_types is set, the connection class will automatically detect port, addr and subnet arguments.
+
+So, you can write
+
+	$b->send("1.2.5.8", "77/udp);
+	
+instead of
+	
+	$b->send(addr("1.2.5.8"), port("77/udp"));
 
 =cut
 
@@ -164,7 +175,7 @@ sub event {
 		self => $self,
 	);
 
-	say "registering event $name";
+	#say "registering event $name";
 	addCallback($self->broconn, $name, \%call);
 }
 
@@ -380,6 +391,7 @@ sub parseArgument {
 	my $arg = shift;
 	my $type;
 	
+	
 	if ( !defined($arg) ) {
 		# well, this is perfectly ok. 
 		$type = "BRO_TYPE_UNKNOWN";
@@ -453,7 +465,24 @@ sub send {
 	
 	
 	my $ev = bro_event_new($name);
-	for my $arg (@_) {
+	for (@_) {
+		my $arg = $_; # otherwise perl complains that we are changing a read-only value :)
+		if ( !defined(blessed($arg)) && !ref($arg) && $self->guess_types ) {
+			# ok, type guessing time :)
+			# say "guessing what $arg is";
+			if ( $arg =~ m#^\d+/(tcp|udp)$# ) {
+				# say "port";
+				$arg = port($arg);
+			} elsif ( $arg =~ m#^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$# ) {
+				# say "addr";
+				$arg = addr($arg);
+			} elsif ( $arg =~ m#^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}/\d+$# ) {
+				# say "subnet";
+				$arg = subnet($arg);
+			}
+		}
+
+		
 		my ($typenum, $value) = parseArgument($arg);
 		
 		bro_event_add_val_short($ev, $typenum, $value);
