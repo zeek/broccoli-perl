@@ -87,10 +87,13 @@ type test6_outer: record {
     second: test6_inner;
 };
 
+global test7: event(r: test6_outer);
 
 event test6(r: test6_outer)
 {
     print "==== record of record";
     print r;
+    event test7(r);
 }
+
 

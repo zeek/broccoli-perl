@@ -3,7 +3,7 @@ use 5.12.0;
 use Broccoli::Connection qw/:types/;
 use Data::Dumper;
 
-my $b = Broccoli::Connection->new({destination => "localhost:47758"});
+my $b = Broccoli::Connection->new({destination => "localhost:47758", guess_types => 1});
 my $recv = 0;
 
 $b->event("test2", sub {
@@ -23,12 +23,15 @@ $b->event("test4", sub {
 	$recv++;
 });
 
-$b->event("test7", sub {
-	say "got event test7";
-	say Dumper(\@_);
-	$recv++;
-});
-	
+$recv = 0;
+
+for(;;) {
+	$b->process();
+	if ( $recv == 2 ) {
+		last;
+	}
+	sleep(1);
+}	
 
 $b->registerEvents();
 
@@ -40,9 +43,9 @@ $b->send("test1",
 		bool(0), 
 		double(1.5), 
 		"Servus", 
-		port("5555/tcp"), 
-		addr("6.7.6.5"), 
-		subnet("192.168.0.0/16")
+		"5555/tcp", 
+		"6.7.6.5", 
+		"192.168.0.0/16"
 );
 
 for(;;) {
@@ -53,7 +56,7 @@ for(;;) {
 	sleep(1);
 }
 
-$b->send("test3", { a => 42, b => addr("6.6.7.7") });
+$b->send("test3", { a => 42, b => "6.6.7.7" });
 
 $recv = 0;
 
@@ -67,21 +70,17 @@ for(;;) {
 
 $b->send("test5", { one => undef, a => 13, b => undef, c => "helloworld", d => "undef" } );
 
-say "sending test6";
-#$b->send("test6", { a => 42, b => addr("6.6.7.7") } );
+$b->send("test6", { first => { a => 42, b => "6.6.7.7" }, second => { c => "hi" } } );
 
-
-$b->send("test6", { first => { a => 42, b => addr("6.6.7.7") }, second => { c => "hi" } } );
+sleep(1);
 
 $recv = 0;
 
 for(;;) {
 	$b->process();
-	if ( $recv == 1 ) {
+	if ( $recv == 2 ) {
 		last;
 	}
 	sleep(1);
 }
 
-
-sleep(1);
