@@ -104,7 +104,7 @@ Broccoli::Connection - connect to broccoli
 	});
 	
 	# send records of records
-	$b->send("RecordOfRecordTest, { first => { intvalue => 1 }, second => { addr => addr("192.168.17.1") }};
+	$b->send("RecordOfRecordTest", { first => { intvalue => 1 }, second => { addr => addr("192.168.17.1") }};
 
 	# define event handlers
 	$b->event("pong", sub {
@@ -131,7 +131,7 @@ Destination is the bro connection information. If guess_types is set, the connec
 
 So, you can write
 
-	$b->send("1.2.5.8", "77/udp);
+	$b->send("1.2.5.8", "77/udp");
 	
 instead of
 	
@@ -455,7 +455,6 @@ Records can be sent by defining a hashref, e.g.:
 		b => count(2).
 	});
 
-=back
 
 =cut
 
@@ -480,17 +479,6 @@ sub send {
 				# say "subnet";
 				$arg = subnet($arg);
 			}
-		}
-
-		
-		my ($typenum, $value) = parseArgument($arg);
-		
-		bro_event_add_val_short($ev, $typenum, $value);
-		#say "Adding $typenum";
-
-	}
-
-	bro_event_send($self->broconn, $ev);
 	bro_event_free($ev);
 	bro_conn_process_input($self->broconn);
 }
@@ -499,6 +487,7 @@ sub send {
 
 Process pending input events
 
+=back
 =cut
 
 sub process {
