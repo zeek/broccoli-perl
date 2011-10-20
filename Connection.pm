@@ -91,11 +91,13 @@ Broccoli::Connection - connect to broccoli
 	# connect to bro
 	my $b = Broccoli::Connection->new(
 		{
-			destination => "localhost:47758"
+			destination => "localhost:47758",
+			quess_types => 1,
 		});
 
 	# send events
-	$b->send("ping", seq++);
+	my $seq = 0;
+	$b->send("ping", $seq++);
 
 	# send records
 	$b->send("recordtest", {
@@ -104,7 +106,13 @@ Broccoli::Connection - connect to broccoli
 	});
 	
 	# send records of records
-	$b->send("RecordOfRecordTest", { first => { intvalue => 1 }, second => { addr => addr("192.168.17.1") }};
+	$b->send("RecordOfRecordTest", { 
+		first => { intvalue => 1 }, 
+		second => { addr => "192.168.17.1" }
+	};
+
+	# specify record types
+	$b->send("counttest", count(5));
 
 	# define event handlers
 	$b->event("pong", sub {
