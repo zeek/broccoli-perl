@@ -1,0 +1,56 @@
+..      -*- mode: rst-mode -*-
+..
+.. Version number is filled in automatically.
+.. |version| replace:: 0.1-1
+
+==========================
+Perl Bindings for Broccoli
+==========================
+
+.. class:: opening
+
+    This Perl module provides bindings for `Broccoli
+    <{{git('broccoli:doc/broccoli-manual.rst')}}>`_, Bro's client
+    communication library. Note that this package is still considered
+    experimental, and not yet part of the Broccoli distribution.
+    Please let us know whether it works for you.
+
+.. contents::
+
+
+Download
+--------
+
+Broccoli-Perl's git repository is located at
+`git://git.bro-ids.org/broccoli-perl.git
+<git://git.bro-ids.org/broccoli-perl.git>`__. You can browse the
+repository `here <http://git.bro-ids.org/broccoli-perl.git>`__. Please
+note that we do not yet provide releases outside of git (but plan to
+do so in the future)
+
+This document describes Broccoli-Perl |version|. See the `CHANGES
+<{{git('broccoli-perl:CHANGES')}}>`__ file for version history.
+
+
+Installation
+------------
+
+Broccoli-Perl requires:
+
+    * Inline with C bindings
+    * Class::Accessor
+    * Carp::Assert
+
+To install do something like::
+
+    export CCFLAGS="-I/usr/local/bro/include"
+    export LDDFLAGS="-L/usr/local/bro/lib"
+
+    perl Makefile.PL
+
+    make
+    make install
+
+If ``broccoli.h`` is not found (many unknown definitions), check
+``CCFLAGS``. If scripts complain about dynamic linking errors at
+start, check ``LDDFLAGS``.
