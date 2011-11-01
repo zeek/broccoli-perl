@@ -487,6 +487,16 @@ sub send {
 				# say "subnet";
 				$arg = subnet($arg);
 			}
+
+		}
+               
+		my ($typenum, $value) = parseArgument($arg);
+		bro_event_add_val_short($ev, $typenum, $value);
+
+	}
+
+	bro_event_send($self->broconn, $ev);
+			
 	bro_event_free($ev);
 	bro_conn_process_input($self->broconn);
 }
