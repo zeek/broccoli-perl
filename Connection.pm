@@ -506,6 +506,7 @@ sub send {
 Process pending input events
 
 =back
+
 =cut
 
 sub process {
