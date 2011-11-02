@@ -111,7 +111,7 @@ Broccoli::Connection - connect to broccoli
 		second => { addr => "192.168.17.1" }
 	};
 
-	# specify record types
+	# specify types
 	$b->send("counttest", count(5));
 
 	# define event handlers
@@ -121,7 +121,7 @@ Broccoli::Connection - connect to broccoli
 	});
 
 	# register event handlers with broccoli
-	$b->registerEvents() 
+	$b->registerEvents();
 
 =head1 FUNCTIONS
 

@@ -51,6 +51,99 @@ To install do something like::
     make
     make install
 
-If ``broccoli.h`` is not found (many unknown definitions), check
-``CCFLAGS``. If scripts complain about dynamic linking errors at
+If ``broccoli.h`` is not found (many unknown definition errors), check
+``CCFLAGS``. If a scripts complain about dynamic linking errors at
 start, check ``LDDFLAGS``.
+
+Usage
+-----
+
+The following examples give a short demonstration on how to send and receive
+Bro events in Perl.
+
+A more thorough explanation can be found in the pod documentation of the module.
+
+Connectiong to Bro
+~~~~~~~~~~~~~~~~~~
+
+The following code opens a connection to a remote Bro instance. Automatic type guessing is enabled.
+
+::
+
+	# import Broccoli and all types
+	use Broccoli::Connection qw/:types/;
+
+	# connect to bro
+	my $b = Broccoli::Connection->new(
+		{
+			destination => "localhost:47758",
+			quess_types => 1,
+		}
+	});
+
+Sending Events
+~~~~~~~~~~~~~~
+
+When a bro connection has been set up, it can be used to send events:
+
+::
+
+	# send events
+	my $seq = 0;
+	$b->send("ping", $seq++);
+
+Records are automaticially generated from Hashes:
+
+::
+
+	# send records
+	$b->send("recordtest", {
+		intvalue => 1,
+		stringvalue => "hi",
+	});
+
+	# send records of records
+	$b->send("RecordOfRecordTest", { 
+		first => { intvalue => 1 }, 
+		second => { addr => "192.168.17.1" }
+	};
+
+Types can be explecitely specified when necessary. For more details see the pod documentation
+
+::
+
+	# specify type
+	$b->send("counttest", count(5));
+
+Receiving Events
+~~~~~~~~~~~~~~~~
+
+To receive events, a callback function has to be specified. 
+
+::
+
+	# define event handlers
+	$b->event("pong", sub {
+		my $seq = shift;
+		say "Received pong with number $seq";
+	});
+
+After defining all callback functons, the event handlers have to be registered by calling
+
+::
+
+	$b->registerEvents();
+
+Bro data types are automatically converted to the perl equivalents. Records are converted to hashes.
+
+Examples
+--------
+
+Some examples are in te ``examples`` subdirectory.
+
+	- ``broping.pl`` sends pings to the ``broping.bro`` script included with Broccoli.
+
+	- ``broping-record.py`` sends pings to the ``broping-record`` script included with Broccoli.
+
+	- ``test.pl`` and ``test_guesstypes.pl`` together with ``test.bro`` show most of the features supported
+	  by the library.
