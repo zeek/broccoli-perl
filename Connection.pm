@@ -2,28 +2,22 @@ package Broccoli::Connection::Type;
 
 #dummy packages for blessing types
 
-
 package Broccoli::Connection;
 
-use 5.12.0;
+use 5.10.1;
 use strict;
 use warnings;
 
-use Class::Accessor;
-use Carp::Assert;
-use Data::Dumper;
 use Exporter;
 use Scalar::Util qw/blessed/;
 
-use base qw(Exporter Class::Accessor);
+use base qw(Exporter);
 our $VERSION = 0.01;
 
 
 our %EXPORT_TAGS = ('types' => [qw/count btime current_time port interval double addr subnet bool/] );
 
 Exporter::export_ok_tags('types');
-
-__PACKAGE__->mk_accessors(qw/destination broconn guess_types/);
 
 my %BROTYPES = ( 
 BRO_TYPE_UNKNOWN =>          0,
@@ -90,10 +84,9 @@ Broccoli::Connection - connect to broccoli
 
 	# connect to bro
 	my $b = Broccoli::Connection->new(
-		{
 			destination => "localhost:47758",
 			quess_types => 1,
-		});
+		);
 
 	# send events
 	my $seq = 0;
@@ -129,7 +122,7 @@ Broccoli::Connection - connect to broccoli
 
 =item B<new>
 
-	my $bro = Broccoli::Connection->new(\%Parameters);
+	my $bro = Broccoli::Connection->new(%Parameters);
 
 Create a new bro connection. 
 
@@ -147,10 +140,43 @@ instead of
 
 =cut
 
-sub new {
-	my $self = Class::Accessor::new(@_);
+
+sub destination {
+	my ($self, $arg) = @_;
 	
-	assert(defined($self->destination));
+	if ( defined($arg) ) {
+		$$self{"destination"} = $arg;
+	}
+
+	return $$self{"destination"};
+}
+
+sub broconn {
+	my ($self, $arg) = @_;
+	
+	if ( defined($arg) ) {
+		$$self{"broconn"} = $arg;
+	}
+
+	return $$self{"broconn"};
+}
+
+sub guess_types {
+	my ($self, $arg) = @_;
+	
+	if ( defined($arg) ) {
+		$$self{"guess_types"} = $arg;
+	}
+
+	return $$self{"guess_types"};
+}
+
+sub new {
+	my $class = shift;
+	my $self = { @_ };
+	bless $self, $class;
+	
+	die("assertion") unless(defined($self->destination));
 
 	$self->broconn(setup($self->destination));
 	if ( !defined($self->guess_types) ) {
@@ -173,9 +199,9 @@ sub event {
 	my $self = shift;
 
 	my $name = shift;
-	assert(defined($name));
+	die("assertion") unless(defined($name));
 	my $coderef = shift;
-	assert(defined($coderef));
+	die("assertion") unless(defined($coderef));
 	
 	my %call = (
 		event => $name,
@@ -190,7 +216,7 @@ sub event {
 
 sub dispatchCallback {
 	my $param = shift;
-	assert(defined($param));
+	die("assertion") unless(defined($param));
 		
 	&{$$param{"callback"}}(@_);
 }
@@ -226,7 +252,7 @@ sub count {
 	shift if ( defined $_[0] && defined(blessed($_[0])) && blessed($_[0]) eq __PACKAGE__ );
 
 	my $arg = shift;
-	assert(defined($arg));
+	die("assertion") unless(defined($arg));
 
 	return bless {
 		type => "BRO_TYPE_COUNT",
@@ -244,7 +270,7 @@ sub bool {
 	shift if ( defined $_[0] && defined(blessed($_[0])) && blessed($_[0]) eq __PACKAGE__ );
 
 	my $arg = shift;
-	assert(defined($arg));
+	die("assertion") unless(defined($arg));
 
 	return bless {
 		type => "BRO_TYPE_BOOL",
@@ -264,7 +290,7 @@ sub btime {
 	shift if ( defined $_[0] && defined(blessed($_[0])) && blessed($_[0]) eq __PACKAGE__ );
 
 	my $arg = shift;
-	assert(defined($arg));
+	die("assertion") unless(defined($arg));
 
 	return bless {
 		type => "BRO_TYPE_TIME",
@@ -284,14 +310,14 @@ sub port {
 	shift if ( defined $_[0] && defined(blessed($_[0])) && blessed($_[0]) eq __PACKAGE__ );
 
 	my $arg = shift;
-	assert(defined($arg));
+	die("assertion") unless(defined($arg));
 
 	die unless($arg =~ m#(\d+)\/(\w+)#);
 	
 	my $port = $1;
 	my $proto = $2;
 
-	assert (defined($protocols{lc($proto)}));
+	die("assertion") unless (defined($protocols{lc($proto)}));
 
 	return bless {
 		type => "BRO_TYPE_PORT",
@@ -309,7 +335,7 @@ sub interval {
 	shift if ( defined $_[0] && defined(blessed($_[0])) && blessed($_[0]) eq __PACKAGE__ );
 
 	my $arg = shift;
-	assert(defined($arg));
+	die("assertion") unless(defined($arg));
 
 	return bless {
 		type => "BRO_TYPE_INTERVAL",
@@ -328,7 +354,7 @@ sub double {
 	shift if ( defined $_[0] && defined(blessed($_[0])) && blessed($_[0]) eq __PACKAGE__ );
 
 	my $arg = shift;
-	assert(defined($arg));
+	die("assertion") unless(defined($arg));
 
 	return bless {
 		type => "BRO_TYPE_DOUBLE",
@@ -347,7 +373,7 @@ sub addr {
 	shift if ( defined $_[0] && defined(blessed($_[0])) && blessed($_[0]) eq __PACKAGE__ );
 
 	my $arg = shift;
-	assert(defined($arg));
+	die("assertion") unless(defined($arg));
 	
 	#die("invalid addr format: $arg") unless($arg =~ m#(\d+)\/(\w+)#);
 	
@@ -368,7 +394,7 @@ sub subnet {
 	shift if ( defined $_[0] && defined(blessed($_[0])) && blessed($_[0]) eq __PACKAGE__ );
 
 	my $arg = shift;
-	assert(defined($arg));
+	die("assertion") unless(defined($arg));
 
 	die("invalid addr format: $arg") unless($arg =~ m#(^[\d\.]+)\/(\w+)$#);
 	
@@ -396,9 +422,25 @@ sub current_time {
 }
 
 sub parseArgument {
+	my $self = shift;
 	my $arg = shift;
 	my $type;
-	
+
+	if ( defined($arg) && !defined(blessed($arg)) && !ref($arg) && $self->guess_types ) {
+		# ok, type guessing time :)
+		# say "guessing what $arg is";
+		if ( $arg =~ m#^\d+/(tcp|udp)$# ) {
+			# say "port";
+			$arg = port($arg);
+		} elsif ( $arg =~ m#^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$# ) {
+			# say "addr";
+			$arg = addr($arg);
+		} elsif ( $arg =~ m#^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}/\d+$# ) {
+			# say "subnet";
+			$arg = subnet($arg);
+		}
+	}
+              
 	
 	if ( !defined($arg) ) {
 		# well, this is perfectly ok. 
@@ -406,8 +448,8 @@ sub parseArgument {
 	} else { 
 		
 		if ( defined(blessed($arg)) &&  blessed($arg) eq 'Broccoli::Connection::Type') {
-			assert(defined($$arg{"type"}));
-			assert(defined($$arg{"value"}));
+			die("assertion") unless(defined($$arg{"type"}));
+			die("assertion") unless(defined($$arg{"value"}));
 			$type = $$arg{"type"};
 			$arg = $$arg{"value"};		
 
@@ -416,10 +458,12 @@ sub parseArgument {
 			#say "creating record";
 		
 			while (my ($key, $value) = each($arg) ) {
-				my ($type, $val) = parseArgument($value);
+				my ($type, $val) = $self->parseArgument($value);
 				#say "adding type $type to record";
 				my $res = bro_record_add_val_short($record, $key, $type, $val) if ($type != 0);  # Ignore BRO_TYPE_UNKNOWN
-				assert($res != 0) if ( $type != 0 ) ;
+				if ( $type != 0 ) {
+					die("assertion") unless($res != 0);
+				}
 			}
 		
 			return (18, $record);
@@ -473,24 +517,7 @@ sub send {
 	
 	my $ev = bro_event_new($name);
 	for (@_) {
-		my $arg = $_; # otherwise perl complains that we are changing a read-only value :)
-		if ( !defined(blessed($arg)) && !ref($arg) && $self->guess_types ) {
-			# ok, type guessing time :)
-			# say "guessing what $arg is";
-			if ( $arg =~ m#^\d+/(tcp|udp)$# ) {
-				# say "port";
-				$arg = port($arg);
-			} elsif ( $arg =~ m#^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$# ) {
-				# say "addr";
-				$arg = addr($arg);
-			} elsif ( $arg =~ m#^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}/\d+$# ) {
-				# say "subnet";
-				$arg = subnet($arg);
-			}
-
-		}
-               
-		my ($typenum, $value) = parseArgument($arg);
+		my ($typenum, $value) = $self->parseArgument($_);
 		bro_event_add_val_short($ev, $typenum, $value);
 
 	}

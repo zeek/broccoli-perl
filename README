@@ -75,10 +75,8 @@ The following code opens a connection to a remote Bro instance. Automatic type g
 
 	# connect to bro
 	my $b = Broccoli::Connection->new(
-		{
 			destination => "localhost:47758",
 			quess_types => 1,
-		}
 	});
 
 Sending Events

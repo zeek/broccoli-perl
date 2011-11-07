@@ -1,9 +1,9 @@
-use 5.12.0;
+use 5.10.1;
 
 use Broccoli::Connection qw/:types/;
 use Data::Dumper;
 
-my $b = Broccoli::Connection->new({destination => "localhost:47758"});
+my $b = Broccoli::Connection->new(destination => "localhost:47758");
 my $recv = 0;
 
 $b->event("test2", sub {

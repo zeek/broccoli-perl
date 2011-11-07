@@ -1,8 +1,8 @@
-use 5.12.0;
+use 5.10.1;
 
 use Broccoli::Connection qw/:types/;
 
-my $b = Broccoli::Connection->new({destination => "localhost:47758"});
+my $b = Broccoli::Connection->new(destination => "localhost:47758");
 
 $b->event("pong", sub {
 	my $rec = shift;
