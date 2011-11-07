@@ -1,8 +1,6 @@
 Requirements:
 
-Inline with C bindings
-Class::Accessor
-Carp::Assert
+perl 5.10.1
 
 To install do something like:
 

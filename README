@@ -35,11 +35,7 @@ This document describes Broccoli-Perl |version|. See the `CHANGES
 Installation
 ------------
 
-Broccoli-Perl requires:
-
-    * Inline with C bindings
-    * Class::Accessor
-    * Carp::Assert
+Broccoli-Perl requires perl 5.10.1 or newer.
 
 To install do something like::
 

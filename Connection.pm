@@ -14,6 +14,7 @@ use Scalar::Util qw/blessed/;
 use base qw(Exporter);
 our $VERSION = 0.01;
 
+XSLoader::load "Broccoli::Connection", $VERSION;
 
 our %EXPORT_TAGS = ('types' => [qw/count btime current_time port interval double addr subnet bool/] );
 
@@ -543,360 +544,357 @@ sub process {
 
 
 
-use Inline C => Config =>
-        VERSION => '0.01',
-        NAME => 'Broccoli::Connection',
-	LIBS => $ENV{LDDFLAGS}.' -lbroccoli',
-#	MYEXTLIB => '-lbroccoli',
-	CCFLAGS => $ENV{CCFLAGS},
-#       MYEXTLIB => '/n/shokuji/db/bernhard/broinstall/lib/libbroccoli.so',
-#	CCFLAGS => "-I/n/shokuji/db/bernhard/broinstall/include",
-#	TYPEMAPS => "/n/shokuji/db/bernhard/Broccoli-Connection/lib/Broccoli/btypemap",
-	AUTO_INCLUDE => '#include "broccoli.h"',
-	ENABLE => "AUTOWRAP";
-
-use Inline C => <<'END_OF_C_CODE';
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
-
-
-SV* parseArg(BroEvArg arg) {
-	switch ( arg.arg_type ) {
-		case BRO_TYPE_BOOL:
-		case BRO_TYPE_INT: {
-			int64_t* val = (int64_t *) arg.arg_data;
-
-			int v = *val;
-
-			return (newSViv(v));
-			break;
-		}
-		
-		case BRO_TYPE_COUNT:
-		case BRO_TYPE_COUNTER: {
-			uint64_t* val = (uint64_t *) arg.arg_data;
-
-			return (newSVuv(*val));
-			break;
-		}
-		
-		case BRO_TYPE_DOUBLE:
-		case BRO_TYPE_TIME:
-		case BRO_TYPE_INTERVAL: {
-			double* val = (double *) arg.arg_data;
-			double v = *val;			
-			
-			return (newSVnv(v));
-			break;
-		} 
-		
-		case BRO_TYPE_STRING: {
-			BroString *str = (BroString*) arg.arg_data;
-			
-			SV* val = newSVpvn(str->str_val, str->str_len);
-			return val;
-			break;
-		}
-		
-		case BRO_TYPE_PORT: {
-			BroPort *port = (BroPort*) arg.arg_data;
-			
-			SV* out = newSVpvf("%u/%d", port->port_num, port->port_proto);
-			return out;
-			break;
-		}
-		
-		case BRO_TYPE_SUBNET: {
-			BroSubnet *net = (BroSubnet*) arg.arg_data;
-			
-			struct in_addr address;
-			address.s_addr = net->sn_net;
-			char* str = inet_ntoa(address);
-
-			SV* out = newSVpvf("%s/%d", str, net->sn_width);
-			return out;
-			break;
-		}
-
-		
-		case BRO_TYPE_IPADDR: {
-			double* val = (double *) arg.arg_data;
-			
-			struct in_addr address;
-			address.s_addr = val;
-			
-			char* str = inet_ntoa(address);
-			SV* out = newSVpv(str, 0);
-			return out;
-			break;
-		}
-		
-		case BRO_TYPE_RECORD: { // oh, yummie, a record
-			HV* h = newHV();
-			BroRecord *rec = arg.arg_data;
-			int i = 0;
-			int *type = (int*) malloc(sizeof(int));
-			const char *name;
-			while ( (name = bro_record_get_nth_name(rec, i) ) != NULL ) {
-				*type = BRO_TYPE_UNKNOWN;
-				void * value = bro_record_get_nth_val(rec, i, type);
-				//printf("Adding field: %s at position %d with type %d\n", name, i, *type);
-				if ( value == NULL ) {
-					croak("Internal error - undefined value. Record name %s", name);
-				}
-				
-				BroEvArg dummyev;
-				dummyev.arg_data = value;
-				dummyev.arg_type = *type;
-				
-				hv_store(h, name, strlen(name), parseArg(dummyev), 0); 
-				i++;
-			}
-			return newRV_noinc((SV*) h);
-			break;
-		}
-
-		default: {	
-			croak("unimplemented type %d in parsearg", arg.arg_type);
-		}
-	}
-}
-
-void callbackfunction(BroConn *bc, void* user_data, BroEvMeta *meta) {
-
-	//char * event_name = (char*) user_data;
-	if ( user_data == NULL ) {
-		croak("null userdata");
-	}
-
-	SV* s = (SV*) user_data;
-
-	// ok, handle the meta arguments...
-	int numargs = meta->ev_numargs;
-	int i; 
-
-	//printf("%d args", numargs);
-	
-	BroEvArg* args = meta->ev_args;
-
-	dSP;
-	ENTER;
-	SAVETMPS;
-	PUSHMARK(SP);
-	XPUSHs(s);
-	
-	for ( i = 0; i < numargs; i++ ) {
-		XPUSHs(sv_2mortal(parseArg(args[i])));
-	}
-	
-	PUTBACK;
-	call_pv("dispatchCallback", G_DISCARD);
-	
-	FREETMPS;
-	LEAVE;
-
-	//croak("Callback called -- event name was %s", event_name);
-}
-
-void addCallback(BroConn *bc, const char* event_name, SV *user_data) {
-	//croak("Registering %s", event_name);
-	//char *eventnamecopy = (char*) malloc(strlen(event_name)+1);
-	//memcpy(eventnamecopy, event_name, strlen(event_name)+1);
-	
-	SV* e = SvREFCNT_inc(user_data);
-
-	bro_event_registry_add_compact(bc, event_name, callbackfunction, (void*) e);
-}
-
-void * stringToPtr(const char *string) {
-	char * out = malloc(strlen(string)+1);
-	memcpy(out, string, strlen(string)+1);
-	return (void*)out; 
-	//return (void*) &string;
-}
-
-BroConn *setup(char * destination) {
-	bro_init(NULL);
-	BroConn *bc = bro_conn_new_str(destination, BRO_CFLAG_NONE);
-	
-	if ( !bc ) {
-		croak("Could not get connection handle");
-	}
-	
-	if ( !bro_conn_connect(bc)) {
-		croak("Could not connect to bro");
-	}
-
-	return bc;
-
-}
-
-
-void * objToVal(SV* obj, int type) {
-	switch (type) {
-		case BRO_TYPE_BOOL:
-		case BRO_TYPE_INT: {
-			int64_t* tmp = (int64_t *)malloc(sizeof(int64_t));
-			*tmp = SvIV(obj);
-			return (void*) tmp;
-			break;
-		}
-
-		case BRO_TYPE_PORT: {
-			// obj is arrayref.
-			if ( !SvRV(obj) ) {
-				croak("Expected reference");
-			}
-			if ( !( SvTYPE(SvRV(obj)) == SVt_PVAV ) ) {
-				croak("Expected array reference");
-			}
-			
-			AV* array = (AV*) SvRV(obj);
-			
-			if ( av_len(array) != 1 ) { // index of last element
-				croak("Expected pair, len is: %d", av_len(array));
-			}
-			
-			SV* theport = av_shift(array);
-			SV* theprotocol = av_shift(array);
-			
-			BroPort* port = (BroPort *)malloc(sizeof(BroPort));
-			port->port_num = SvUV(theport);
-			port->port_proto = SvIV(theprotocol);
-			return (void*) port;
-			break;
-			
-		}
-		
-		case BRO_TYPE_SUBNET: {
-			// obj is arrayref.
-			if ( !SvRV(obj) ) {
-				croak("Expected reference");
-			}
-			if ( !( SvTYPE(SvRV(obj)) == SVt_PVAV ) ) {
-				croak("Expected array reference");
-			}
-			
-			AV* array = (AV*) SvRV(obj);
-			
-			if ( av_len(array) != 1 ) { // index of last element
-				croak("Expected pair, len is: %d", av_len(array));
-			}
-			
-			SV* thenet = av_shift(array);
-			SV* thewidth = av_shift(array);
-			const char* netchar = SvPV_nolen(thenet);
-			
-			struct in_addr addr;
-			int res = inet_aton(netchar, &addr);
-			if ( res == 0 ) {
-				croak("not an address");
-			}
-
-			
-			BroSubnet* net = (BroSubnet *)malloc(sizeof(BroSubnet));
-			//printf("the net is %u\n", SvUV(thenet));
-			net->sn_net = addr.s_addr;
-			net->sn_width = SvUV(thewidth);
-			return (void*) net;
-			break;
-			
-		}
-
-
-		case BRO_TYPE_COUNT:
-		case BRO_TYPE_COUNTER: {
-			uint64_t* tmp = (uint64_t *)malloc(sizeof(uint64_t));
-			*tmp = SvUV(obj);
-			return (void*) tmp;
-			break;
-		}
-
-		case BRO_TYPE_DOUBLE:
-		case BRO_TYPE_TIME:
-		case BRO_TYPE_INTERVAL: {
-			double* tmp = (double *)malloc(sizeof(double));
-			*tmp = SvNV(obj);
-			return (void*) tmp;
-			break;
-		}
-				
-		case BRO_TYPE_IPADDR: {
-			const char* tmp;
-			tmp = SvPV_nolen(obj);
-			//printf("address: %s\n", tmp);
-
-			struct in_addr addr;
-			int res = inet_aton(tmp, &addr);
-			if ( res == 0 ) {
-				croak("not an address");
-			}
-			
-			uint32_t* out = (uint32_t*)malloc(sizeof(uint32_t));
-			*out = addr.s_addr;
-			
-			return (void*) out;
-			break;
-		}
-
-		case BRO_TYPE_STRING: {
-			BroString* str = (BroString*) malloc(sizeof(BroString));
-			bro_string_init(str);
-			STRLEN len;
-			char* tmp;
-			tmp = SvPV(obj, len);
-			
-			if ( !bro_string_set_data(str, tmp, len)) {
-				carp("Problem");
-			} 
-
-			return (void*) str;
-			break;
-		}
-		
-		case BRO_TYPE_UNKNOWN: {
-			// test if car is undef.
-			if ( SvOK(obj) ) {
-				carp("Undefined object is defined?");
-			}
-			
-			return NULL;
-		}
-		
-		default: {
-			croak("unimplemented type %d in objtoval", type);
-			return NULL;
-		}
-	}
-}
-
-int bro_event_add_val_short(BroEvent *be, int type, const void *val) {
-	return bro_event_add_val(be, type, NULL, val);
-}
-
-int bro_record_add_val_short(BroRecord *rec, const char *name, int type, const void *val) {
-	return bro_record_add_val(rec, name, type, NULL, val);
-}
-
-
-int            bro_init(const BroCtx *ctx);
-BroConn       *bro_conn_new_str(const char *hostname, int flags);
-void           bro_conn_set_class(BroConn *bc, const char *classname);
-int            bro_conn_connect(BroConn *bc);
-int            bro_conn_process_input(BroConn *bc);
-int            bro_event_queue_length(BroConn *bc);
-BroEvent      *bro_event_new(const char *event_name);
-void           bro_event_free(BroEvent *be);
-int            bro_event_add_val(BroEvent *be, int type, const char *type_name, const void *val);
-int            bro_event_send(BroConn *bc, BroEvent *be);
-void           bro_event_registry_add_compact(BroConn *bc, const char *event_name, BroCompactEventFunc func, void *user_data);
-double         bro_util_current_time();
-BroRecord     *bro_record_new();
-int            bro_conn_get_fd(BroConn *bc);
-void           bro_event_registry_request(BroConn *bc);
-
-
-END_OF_C_CODE
+# use Inline C => Config =>
+#         VERSION => '0.01',
+#         NAME => 'Broccoli::Connection',
+# 	LIBS => $ENV{LDDFLAGS}.' -lbroccoli',
+# #	MYEXTLIB => '-lbroccoli',
+# 	CCFLAGS => $ENV{CCFLAGS},
+# #       MYEXTLIB => '/n/shokuji/db/bernhard/broinstall/lib/libbroccoli.so',
+# #	CCFLAGS => "-I/n/shokuji/db/bernhard/broinstall/include",
+# #	TYPEMAPS => "/n/shokuji/db/bernhard/Broccoli-Connection/lib/Broccoli/btypemap",
+# 	AUTO_INCLUDE => '#include "broccoli.h"',
+# 	ENABLE => "AUTOWRAP";
+# 
+# use Inline C => <<'END_OF_C_CODE';
+# #include <sys/socket.h>
+# #include <netinet/in.h>
+# #include <arpa/inet.h>
+# 
+# SV* parseArg(BroEvArg arg) {
+# 	switch ( arg.arg_type ) {
+# 		case BRO_TYPE_BOOL:
+# 		case BRO_TYPE_INT: {
+# 			int64_t* val = (int64_t *) arg.arg_data;
+# 
+# 			int v = *val;
+# 
+# 			return (newSViv(v));
+# 			break;
+# 		}
+# 		
+# 		case BRO_TYPE_COUNT:
+# 		case BRO_TYPE_COUNTER: {
+# 			uint64_t* val = (uint64_t *) arg.arg_data;
+# 
+# 			return (newSVuv(*val));
+# 			break;
+# 		}
+# 		
+# 		case BRO_TYPE_DOUBLE:
+# 		case BRO_TYPE_TIME:
+# 		case BRO_TYPE_INTERVAL: {
+# 			double* val = (double *) arg.arg_data;
+# 			double v = *val;			
+# 			
+# 			return (newSVnv(v));
+# 			break;
+# 		} 
+# 		
+# 		case BRO_TYPE_STRING: {
+# 			BroString *str = (BroString*) arg.arg_data;
+# 			
+# 			SV* val = newSVpvn(str->str_val, str->str_len);
+# 			return val;
+# 			break;
+# 		}
+# 		
+# 		case BRO_TYPE_PORT: {
+# 			BroPort *port = (BroPort*) arg.arg_data;
+# 			
+# 			SV* out = newSVpvf("%u/%d", port->port_num, port->port_proto);
+# 			return out;
+# 			break;
+# 		}
+# 		
+# 		case BRO_TYPE_SUBNET: {
+# 			BroSubnet *net = (BroSubnet*) arg.arg_data;
+# 			
+# 			struct in_addr address;
+# 			address.s_addr = net->sn_net;
+# 			char* str = inet_ntoa(address);
+# 
+# 			SV* out = newSVpvf("%s/%d", str, net->sn_width);
+# 			return out;
+# 			break;
+# 		}
+# 
+# 		
+# 		case BRO_TYPE_IPADDR: {
+# 			struct in_addr address;
+# 			address.s_addr = *((unsigned long*) arg.arg_data);
+# 			
+# 			char* str = inet_ntoa(address);
+# 			SV* out = newSVpv(str, 0);
+# 			return out;
+# 			break;
+# 		}
+# 		
+# 		case BRO_TYPE_RECORD: { // oh, yummie, a record
+# 			HV* h = newHV();
+# 			BroRecord *rec = arg.arg_data;
+# 			int i = 0;
+# 			int *type = (int*) malloc(sizeof(int));
+# 			const char *name;
+# 			while ( (name = bro_record_get_nth_name(rec, i) ) != NULL ) {
+# 				*type = BRO_TYPE_UNKNOWN;
+# 				void * value = bro_record_get_nth_val(rec, i, type);
+# 				//printf("Adding field: %s at position %d with type %d\n", name, i, *type);
+# 				if ( value == NULL ) {
+# 					croak("Internal error - undefined value. Record name %s", name);
+# 				}
+# 				
+# 				BroEvArg dummyev;
+# 				dummyev.arg_data = value;
+# 				dummyev.arg_type = *type;
+# 				
+# 				hv_store(h, name, strlen(name), parseArg(dummyev), 0); 
+# 				i++;
+# 			}
+# 			return newRV_noinc((SV*) h);
+# 			break;
+# 		}
+# 
+# 		default: {	
+# 			croak("unimplemented type %d in parsearg", arg.arg_type);
+# 		}
+# 	}
+# }
+# 
+# void callbackfunction(BroConn *bc, void* user_data, BroEvMeta *meta) {
+# 
+# 	//char * event_name = (char*) user_data;
+# 	if ( user_data == NULL ) {
+# 		croak("null userdata");
+# 	}
+# 
+# 	SV* s = (SV*) user_data;
+# 
+# 	// ok, handle the meta arguments...
+# 	int numargs = meta->ev_numargs;
+# 	int i; 
+# 
+# 	//printf("%d args", numargs);
+# 	
+# 	BroEvArg* args = meta->ev_args;
+# 
+# 	dSP;
+# 	ENTER;
+# 	SAVETMPS;
+# 	PUSHMARK(SP);
+# 	XPUSHs(s);
+# 	
+# 	for ( i = 0; i < numargs; i++ ) {
+# 		XPUSHs(sv_2mortal(parseArg(args[i])));
+# 	}
+# 	
+# 	PUTBACK;
+# 	call_pv("dispatchCallback", G_DISCARD);
+# 	
+# 	FREETMPS;
+# 	LEAVE;
+# 
+# 	//croak("Callback called -- event name was %s", event_name);
+# }
+# 
+# void addCallback(BroConn *bc, const char* event_name, SV *user_data) {
+# 	//croak("Registering %s", event_name);
+# 	//char *eventnamecopy = (char*) malloc(strlen(event_name)+1);
+# 	//memcpy(eventnamecopy, event_name, strlen(event_name)+1);
+# 	
+# 	SV* e = SvREFCNT_inc(user_data);
+# 
+# 	bro_event_registry_add_compact(bc, event_name, callbackfunction, (void*) e);
+# }
+# 
+# void * stringToPtr(const char *string) {
+# 	char * out = malloc(strlen(string)+1);
+# 	memcpy(out, string, strlen(string)+1);
+# 	return (void*)out; 
+# 	//return (void*) &string;
+# }
+# 
+# BroConn *setup(char * destination) {
+# 	bro_init(NULL);
+# 	BroConn *bc = bro_conn_new_str(destination, BRO_CFLAG_NONE);
+# 	
+# 	if ( !bc ) {
+# 		croak("Could not get connection handle");
+# 	}
+# 	
+# 	if ( !bro_conn_connect(bc)) {
+# 		croak("Could not connect to bro");
+# 	}
+# 
+# 	return bc;
+# 
+# }
+# 
+# 
+# void * objToVal(SV* obj, int type) {
+# 	switch (type) {
+# 		case BRO_TYPE_BOOL:
+# 		case BRO_TYPE_INT: {
+# 			int64_t* tmp = (int64_t *)malloc(sizeof(int64_t));
+# 			*tmp = SvIV(obj);
+# 			return (void*) tmp;
+# 			break;
+# 		}
+# 
+# 		case BRO_TYPE_PORT: {
+# 			// obj is arrayref.
+# 			if ( !SvRV(obj) ) {
+# 				croak("Expected reference");
+# 			}
+# 			if ( !( SvTYPE(SvRV(obj)) == SVt_PVAV ) ) {
+# 				croak("Expected array reference");
+# 			}
+# 			
+# 			AV* array = (AV*) SvRV(obj);
+# 			
+# 			if ( av_len(array) != 1 ) { // index of last element
+# 				croak("Expected pair, len is: %d", av_len(array));
+# 			}
+# 			
+# 			SV* theport = av_shift(array);
+# 			SV* theprotocol = av_shift(array);
+# 			
+# 			BroPort* port = (BroPort *)malloc(sizeof(BroPort));
+# 			port->port_num = SvUV(theport);
+# 			port->port_proto = SvIV(theprotocol);
+# 			return (void*) port;
+# 			break;
+# 			
+# 		}
+# 		
+# 		case BRO_TYPE_SUBNET: {
+# 			// obj is arrayref.
+# 			if ( !SvRV(obj) ) {
+# 				croak("Expected reference");
+# 			}
+# 			if ( !( SvTYPE(SvRV(obj)) == SVt_PVAV ) ) {
+# 				croak("Expected array reference");
+# 			}
+# 			
+# 			AV* array = (AV*) SvRV(obj);
+# 			
+# 			if ( av_len(array) != 1 ) { // index of last element
+# 				croak("Expected pair, len is: %d", av_len(array));
+# 			}
+# 			
+# 			SV* thenet = av_shift(array);
+# 			SV* thewidth = av_shift(array);
+# 			const char* netchar = SvPV_nolen(thenet);
+# 			
+# 			struct in_addr addr;
+# 			int res = inet_aton(netchar, &addr);
+# 			if ( res == 0 ) {
+# 				croak("not an address");
+# 			}
+# 
+# 			
+# 			BroSubnet* net = (BroSubnet *)malloc(sizeof(BroSubnet));
+# 			//printf("the net is %u\n", SvUV(thenet));
+# 			net->sn_net = addr.s_addr;
+# 			net->sn_width = SvUV(thewidth);
+# 			return (void*) net;
+# 			break;
+# 			
+# 		}
+# 
+# 
+# 		case BRO_TYPE_COUNT:
+# 		case BRO_TYPE_COUNTER: {
+# 			uint64_t* tmp = (uint64_t *)malloc(sizeof(uint64_t));
+# 			*tmp = SvUV(obj);
+# 			return (void*) tmp;
+# 			break;
+# 		}
+# 
+# 		case BRO_TYPE_DOUBLE:
+# 		case BRO_TYPE_TIME:
+# 		case BRO_TYPE_INTERVAL: {
+# 			double* tmp = (double *)malloc(sizeof(double));
+# 			*tmp = SvNV(obj);
+# 			return (void*) tmp;
+# 			break;
+# 		}
+# 				
+# 		case BRO_TYPE_IPADDR: {
+# 			const char* tmp;
+# 			tmp = SvPV_nolen(obj);
+# 			//printf("address: %s\n", tmp);
+# 
+# 			struct in_addr addr;
+# 			int res = inet_aton(tmp, &addr);
+# 			if ( res == 0 ) {
+# 				croak("not an address");
+# 			}
+# 			
+# 			uint32_t* out = (uint32_t*)malloc(sizeof(uint32_t));
+# 			*out = addr.s_addr;
+# 			
+# 			return (void*) out;
+# 			break;
+# 		}
+# 
+# 		case BRO_TYPE_STRING: {
+# 			BroString* str = (BroString*) malloc(sizeof(BroString));
+# 			bro_string_init(str);
+# 			STRLEN len;
+# 			char* tmp;
+# 			tmp = SvPV(obj, len);
+# 			
+# 			if ( !bro_string_set_data(str, tmp, len)) {
+# 				carp("Problem");
+# 			} 
+# 
+# 			return (void*) str;
+# 			break;
+# 		}
+# 		
+# 		case BRO_TYPE_UNKNOWN: {
+# 			// test if car is undef.
+# 			if ( SvOK(obj) ) {
+# 				carp("Undefined object is defined?");
+# 			}
+# 			
+# 			return NULL;
+# 		}
+# 		
+# 		default: {
+# 			croak("unimplemented type %d in objtoval", type);
+# 			return NULL;
+# 		}
+# 	}
+# }
+# 
+# int bro_event_add_val_short(BroEvent *be, int type, const void *val) {
+# 	return bro_event_add_val(be, type, NULL, val);
+# }
+# 
+# int bro_record_add_val_short(BroRecord *rec, const char *name, int type, const void *val) {
+# 	return bro_record_add_val(rec, name, type, NULL, val);
+# }
+# 
+# 
+# int            bro_init(const BroCtx *ctx);
+# BroConn       *bro_conn_new_str(const char *hostname, int flags);
+# void           bro_conn_set_class(BroConn *bc, const char *classname);
+# int            bro_conn_connect(BroConn *bc);
+# int            bro_conn_process_input(BroConn *bc);
+# int            bro_event_queue_length(BroConn *bc);
+# BroEvent      *bro_event_new(const char *event_name);
+# void           bro_event_free(BroEvent *be);
+# int            bro_event_add_val(BroEvent *be, int type, const char *type_name, const void *val);
+# int            bro_event_send(BroConn *bc, BroEvent *be);
+# void           bro_event_registry_add_compact(BroConn *bc, const char *event_name, BroCompactEventFunc func, void *user_data);
+# double         bro_util_current_time();
+# BroRecord     *bro_record_new();
+# int            bro_conn_get_fd(BroConn *bc);
+# void           bro_event_registry_request(BroConn *bc);
+# 
+# 
+# END_OF_C_CODE
 
 1;
