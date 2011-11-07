@@ -66,11 +66,8 @@ SV* parseArg(BroEvArg arg) {
 
 		
 		case BRO_TYPE_IPADDR: {
-			//double* val = (double *) arg.arg_data;
-			
 			struct in_addr address;
 			address.s_addr = *((unsigned long*) arg.arg_data);
-			printf("Val: %lu \n", *((unsigned long*) arg.arg_data));
 			
 			char* str = inet_ntoa(address);
 			SV* out = newSVpv(str, 0);
